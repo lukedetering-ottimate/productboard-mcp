@@ -21,7 +21,7 @@ export class UpdateNoteTool extends BaseTool<UpdateNoteParams> {
   constructor(apiClient: ProductboardAPIClient, logger: Logger) {
     super(
       'pb_note_update',
-      'Update an existing note: link it to features, add/remove tags, and/or mark it processed. Use this once you\'ve extracted insights from a note and identified which features it relates to. Tags are additive by default (add_tags / remove_tags) so existing tags are preserved — handy for stamping namespaced labels like "importance:nice-to-have", "sentiment:neutral", or "theme:offline-payment-improvements".',
+      'Update an existing note: link it to features, add/remove tags, and/or mark it processed. Use this once you\'ve extracted insights from a note and identified which features it relates to. Tags are additive by default (add_tags / remove_tags) so existing tags are preserved. Missing tag options are created automatically, so namespaced labels like "importance:critical", "sentiment:neutral", or "theme:offline-payment-improvements" attach on first use.',
       {
         type: 'object',
         required: ['id'],
@@ -58,7 +58,7 @@ export class UpdateNoteTool extends BaseTool<UpdateNoteParams> {
           add_tags: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Tag names to add to the note (additive — existing tags are preserved). Tags must already exist in the workspace. Useful for namespaced labels such as "importance:critical", "sentiment:frustrated", "theme:invoice-export-reliability".',
+            description: 'Tag names to add to the note (additive — existing tags are preserved). Missing options are auto-created. Useful for namespaced labels such as "importance:critical", "sentiment:frustrated", "theme:invoice-export-reliability".',
           },
           remove_tags: {
             type: 'array',
@@ -75,6 +75,24 @@ export class UpdateNoteTool extends BaseTool<UpdateNoteParams> {
       apiClient,
       logger
     );
+  }
+
+  /**
+   * Ensure each tag name exists as an option on the "tags" field so it can be
+   * attached. Creating an option that already exists is ignored (conflict).
+   * Errors here are non-fatal — the subsequent addItems patch will surface any
+   * genuine problem.
+   */
+  private async ensureTagsExist(names: string[]): Promise<void> {
+    for (const name of names) {
+      try {
+        await this.apiClient.post('/entities/fields/tags/values', {
+          data: { fields: { name } },
+        });
+      } catch {
+        // Already exists or non-fatal — attach step validates.
+      }
+    }
   }
 
   protected async executeInternal(params: UpdateNoteParams): Promise<unknown> {
@@ -146,18 +164,28 @@ export class UpdateNoteTool extends BaseTool<UpdateNoteParams> {
       );
     }
 
-    // 2. Apply tag changes in their own PATCH using the additive
-    //    addItems/removeItems operations the note's `tags` field supports.
-    //    Kept separate from the scalar field PATCH so a tag failure never
-    //    flips `processed` on its own, and so existing tags are preserved.
+    // 2. Apply tag changes in their own PATCH using v2 JSON-patch operations.
+    //    Missing options are auto-created first (ensureTagsExist) so new
+    //    namespaced tags attach on first use. Additive list edits go through a
+    //    `data.patch` array of {op,path,value} operations — NOT
+    //    `data.fields.tags={addItems}`. Kept separate from the scalar-field
+    //    PATCH because v2 forbids sending both `data.fields` and `data.patch`
+    //    in one request, and so a tag failure never flips `processed` on its own.
     let tagsApplied = false;
     if (addTags.length > 0 || removeTags.length > 0) {
-      const tagOps: Record<string, unknown> = {};
-      if (addTags.length > 0) tagOps.addItems = addTags.map((name) => ({ name }));
-      if (removeTags.length > 0) tagOps.removeItems = removeTags.map((name) => ({ name }));
+      if (addTags.length > 0) {
+        await this.ensureTagsExist(addTags);
+      }
+      const patchOps: Array<Record<string, unknown>> = [];
+      if (addTags.length > 0) {
+        patchOps.push({ op: 'addItems', path: 'tags', value: addTags.map((name) => ({ name })) });
+      }
+      if (removeTags.length > 0) {
+        patchOps.push({ op: 'removeItems', path: 'tags', value: removeTags.map((name) => ({ name })) });
+      }
       try {
         await this.apiClient.patch(`/notes/${params.id}`, {
-          data: { type: 'textNote', fields: { tags: tagOps } },
+          data: { type: 'textNote', patch: patchOps },
         });
         tagsApplied = true;
         const parts: string[] = [];
