@@ -9,6 +9,7 @@ interface UpdateFeatureParams {
   description?: string;
   status_id?: string;
   owner_email?: string;
+  team_id?: string;
   tags?: string[];
 }
 
@@ -42,6 +43,10 @@ export class UpdateFeatureTool extends BaseTool<UpdateFeatureParams> {
             type: 'string',
             format: 'email',
             description: 'New owner email',
+          },
+          team_id: {
+            type: 'string',
+            description: 'UUID of the team that owns this feature (from the teams array on pb_feature_get)',
           },
           tags: {
             type: 'array',
@@ -85,11 +90,12 @@ export class UpdateFeatureTool extends BaseTool<UpdateFeatureParams> {
   protected async executeInternal(params: UpdateFeatureParams): Promise<unknown> {
     const { id, ...updateData } = params;
 
-    const { owner_email, status_id, ...rest } = updateData as Record<string, unknown>;
+    const { owner_email, status_id, team_id, ...rest } = updateData as Record<string, unknown>;
     const fields: Record<string, unknown> = { ...rest };
     if (fields.description) fields.description = (fields.description as string).startsWith('<') ? fields.description : `<p>${fields.description}</p>`;
     if (owner_email) fields.owner = { email: owner_email };
     if (status_id) fields.status = { id: status_id };
+    if (team_id) fields.teams = [{ id: team_id }];
 
     const response = await this.apiClient.patch(`/entities/${id}`, { data: { fields } });
 
