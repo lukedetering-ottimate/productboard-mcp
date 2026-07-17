@@ -1,6 +1,7 @@
 import { BaseTool } from '../base.js';
 import { ProductboardAPIClient } from '@api/index.js';
 import { Logger } from '@utils/logger.js';
+import { RetryHandler } from '@utils/retry.js';
 import { Permission, AccessLevel } from '@auth/permissions.js';
 
 interface ListNotesParams {
@@ -121,7 +122,20 @@ export class ListNotesTool extends BaseTool<ListNotesParams> {
     if (params.updated_from) queryParams.updatedFrom = params.updated_from;
     if (params.updated_to) queryParams.updatedTo = params.updated_to;
 
-    const allNotes = await this.apiClient.getAllPages<any>('/notes', queryParams);
+    // The notes list endpoint is intermittently flaky — larger collections
+    // periodically return a transient network error. The API client already
+    // retries each page a few times, but the blips can outlast that window, so
+    // wrap the whole paged fetch in an additional exponential-backoff retry.
+    const listRetry = new RetryHandler({
+      maxAttempts: 4,
+      backoffStrategy: 'exponential',
+      initialDelay: 1000,
+      maxDelay: 8000,
+      retryCondition: () => true,
+    });
+    const allNotes = await listRetry.withRetries(() =>
+      this.apiClient.getAllPages<any>('/notes', queryParams),
+    );
     const limit = params.limit || 100;
     const notes = allNotes.slice(0, limit);
 
