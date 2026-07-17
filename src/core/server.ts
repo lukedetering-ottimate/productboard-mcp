@@ -32,6 +32,14 @@ import { RateLimiter, CacheModule } from '@middleware/index.js';
 import { Config, Logger } from '@utils/index.js';
 import { ServerError, ProtocolError, ToolExecutionError } from '@utils/errors.js';
 
+/**
+ * Tools whose results must never be cached. `pb_note_list` is read constantly
+ * while notes are being processed (linked / tagged / marked processed), so a
+ * cached page goes stale immediately and hides the writes just made. These
+ * always hit the API for fresh data.
+ */
+const ALWAYS_FRESH_TOOLS = new Set(['pb_note_list']);
+
 export interface ServerDependencies {
   config: Config;
   logger: Logger;
@@ -316,19 +324,27 @@ export class ProductboardMCPServer {
   private async handleToolExecution(toolName: string, params: unknown): Promise<unknown> {
     const { protocolHandler, cache, logger } = this.dependencies;
 
+    // Some tools must always return fresh data (e.g. note lists mutated during
+    // a processing session); for those, never read from or write to the cache.
+    const cacheable = !ALWAYS_FRESH_TOOLS.has(toolName);
+    const cacheKey = cacheable
+      ? cache.getCacheKey({ tool: toolName, method: toolName, params })
+      : null;
+
     // Check cache for read operations
-    const cacheKey = cache.getCacheKey({ tool: toolName, method: toolName, params });
-    const cachedResult = cache.get(cacheKey);
-    if (cachedResult !== null) {
-      logger.debug(`Cache hit for tool: ${toolName}`);
-      return cachedResult;
+    if (cacheKey !== null) {
+      const cachedResult = cache.get(cacheKey);
+      if (cachedResult !== null) {
+        logger.debug(`Cache hit for tool: ${toolName}`);
+        return cachedResult;
+      }
     }
 
     // Execute tool
     const result = await protocolHandler.invokeTool(toolName, params);
 
     // Cache result if applicable
-    if (cache.shouldCache({ tool: toolName, method: toolName, params })) {
+    if (cacheKey !== null && cache.shouldCache({ tool: toolName, method: toolName, params })) {
       cache.set(cacheKey, result);
       logger.debug(`Cached result for tool: ${toolName}`);
     }
