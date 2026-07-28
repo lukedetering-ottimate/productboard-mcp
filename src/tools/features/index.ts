@@ -5,3 +5,4 @@ export { UpdateFeatureHealthTool } from './update-feature-health.js';
 export { SetFeatureSourceTool } from './set-feature-source.js';
 export { DeleteFeatureTool } from './delete-feature.js';
 export { GetFeatureTool } from './get-feature.js';
+export { ListStatusesTool } from './list-statuses.js';
