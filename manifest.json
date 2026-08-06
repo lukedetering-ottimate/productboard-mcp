@@ -2,7 +2,7 @@
   "manifest_version": "0.1",
   "name": "productboard-mcp",
   "display_name": "Productboard",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "MCP server for the Productboard API. Enables AI assistants (Claude, Cursor, etc.) to interact with your Productboard workspace.",
   "author": {
     "name": "Enreign",
@@ -28,7 +28,7 @@
     }
   },
   "tools": [
-    { "name": "pb_feature_list", "description": "List features with filtering" },
+    { "name": "pb_feature_list", "description": "List features with filtering (incl. metadata_source_system/record_id); returns status id + external source key per feature" },
     { "name": "pb_feature_get", "description": "Get a feature by ID" },
     { "name": "pb_feature_create", "description": "Create a new feature" },
     { "name": "pb_feature_update", "description": "Update an existing feature (incl. workflow status via status_id)" },
